@@ -126,14 +126,13 @@ def build_embed(results, title="Game Updates"):
         elif (now_ts - ts) < 604800: s = "\U0001f7e1"
         else: s = "\U0001f534"
         fields.append((s, r["name"], fmt(r["ts"])))
-    mid = (len(fields) + 1) // 2
-    left = fields[:mid]
-    right = fields[mid:]
-    left_str = "\n".join(f"{s} `{w:<11}` **{n}**" for s, n, w in left)
-    right_str = "\n".join(f"{s} `{w:<11}` **{n}**" for s, n, w in right)
+    chunk_size = (len(fields) + 2) // 3
+    cols = [fields[i:i+chunk_size] for i in range(0, len(fields), chunk_size)]
+
     embed = discord.Embed(title=title, color=0x1f6feb, timestamp=datetime.now(timezone.utc))
-    embed.add_field(name="\u200b", value=left_str or "\u200b", inline=True)
-    embed.add_field(name="\u200b", value=right_str or "\u200b", inline=True)
+    for col in cols:
+        text = "\n".join(f"{s} `{w:<11}` **{n}**" for s, n, w in col)
+        embed.add_field(name="\u200b", value=text or "\u200b", inline=True)
     embed.set_footer(text=f"Updates every 10 min | {len(results)} games")
     return embed
 
