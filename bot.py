@@ -54,26 +54,12 @@ def save_config(cfg):
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
-_session = None
-_sem = None
-
-def get_session():
-    global _session
-    if _session is None or _session.closed:
-        _session = aiohttp.ClientSession()
-    return _session
-
-def get_sem():
-    global _sem
-    if _sem is None:
-        _sem = asyncio.Semaphore(10)
-    return _sem
 
 async def fetch_latest(appid):
     url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
     try:
-        async with get_sem():
-            async with get_session().get(
+        async with bot._sem:
+            async with bot._session.get(
                 url,
                 params={"appid": appid, "count": 1, "maxlength": 1, "format": "json"},
                 timeout=aiohttp.ClientTimeout(total=5),
@@ -85,7 +71,8 @@ async def fetch_latest(appid):
                 if not items:
                     return None, None
                 return items[0].get("date", 0), items[0].get("url", "")
-    except Exception:
+    except Exception as e:
+        print(f"  Steam fetch error ({appid}): {e}")
         return None, None
 
 async def fetch_all():
@@ -102,10 +89,15 @@ async def fetch_all():
         results.append({"name": name, "appid": appid, "ts": ts, "url": url})
 
     coros = [one(aid, name) for aid, name in GAMES.items()]
+    print(f"Fetching updates for {len(coros)} games...")
+    t0 = time.time()
     try:
         await asyncio.wait_for(asyncio.gather(*coros), timeout=30)
     except asyncio.TimeoutError:
-        pass
+        print("Fetch timed out after 30s")
+    elapsed = time.time() - t0
+    ok = sum(1 for r in results if r["ts"])
+    print(f"Done: {ok}/{len(GAMES)} games in {elapsed:.1f}s")
     return results
 
 def fmt(ts):
@@ -167,6 +159,8 @@ def build_embed(results, title="Game Updates"):
 # ---------- Events ----------
 @bot.event
 async def on_ready():
+    bot._session = aiohttp.ClientSession()
+    bot._sem = asyncio.Semaphore(10)
     print(f"Logged in as {bot.user}")
     try:
         synced = await bot.tree.sync()
