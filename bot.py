@@ -15,7 +15,7 @@ if not TOKEN and os.path.exists(".env"):
 
 CONFIG_FILE = "bot_config.json"
 
-GAMES = {
+STEAM = {
     "730": ("CS2", "fps"),
     "1172470": ("Apex Legends", "br"),
     "271590": ("GTA V", "openworld"),
@@ -40,7 +40,6 @@ GAMES = {
     "513710": ("Scum", "survival"),
     "872200": ("Rogue Company", "fps"),
     "2479810": ("Gray Zone Warfare", "fps"),
-    "760160": ("Bloodhunt", "br"),
     "671860": ("BattleBit", "fps"),
     "761890": ("Albion Online", "mmo"),
     "1067180": ("Stalcraft", "mmo"),
@@ -87,6 +86,22 @@ GAMES = {
     "2381850": ("Arena Breakout", "fps"),
 }
 
+NON_STEAM = {
+    "valorant": ("Valorant", "VALORANT", "br"),
+    "fortnite": ("Fortnite", "FortNiteBR", "br"),
+    "tarkov": ("Tarkov", "EscapefromTarkov", "fps"),
+    "genshin": ("Genshin Impact", "Genshin_Impact", "gacha"),
+    "starrail": ("Honkai Star Rail", "HonkaiStarRail", "gacha"),
+    "wuwa": ("Wuthering Waves", "WutheringWaves", "gacha"),
+    "zzz": ("Zenless Zone Zero", "ZZZ_Official", "gacha"),
+    "minecraft": ("Minecraft", "Minecraft", "survival"),
+    "roblox": ("Roblox", "roblox", "party"),
+    "osu": ("osu!", "osugame", "sports"),
+    "lol": ("LoL", "leagueoflegends", "moba"),
+    "fivem": ("FiveM", "FiveM", "openworld"),
+    "codmw": ("MW 2019", "modernwarfare", "fps"),
+}
+
 CAT_ICONS = {
     "fps": "\U0001f52b", "br": "\U0001f3af", "survival": "\U0001faa8",
     "mmo": "\U0001f310", "hero": "\U0001f9d1\u200d\U0001f4bb", "moba": "\u2694\ufe0f",
@@ -99,7 +114,6 @@ CAT_ICONS = {
 
 CACHE = {}
 CACHE_TTL = 600
-_prefetched = False
 
 def load_config():
     try:
@@ -118,15 +132,11 @@ def save_config(cfg):
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-async def do_fetch(appid, session, sem):
+async def fetch_steam(appid, session, sem):
     url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
     async with sem:
         try:
-            async with session.get(
-                url,
-                params={"appid": appid, "count": 1, "maxlength": 300, "format": "json"},
-                timeout=aiohttp.ClientTimeout(total=5),
-            ) as r:
+            async with session.get(url, params={"appid": appid, "count": 1, "maxlength": 300, "format": "json"}, timeout=aiohttp.ClientTimeout(total=5)) as r:
                 if r.status != 200:
                     return None, None, None
                 data = await r.json()
@@ -137,21 +147,51 @@ async def do_fetch(appid, session, sem):
         except:
             return None, None, None
 
-async def fetch_games():
+async def fetch_reddit(key, subreddit, session, sem):
+    url = f"https://www.reddit.com/r/{subreddit}/search.json"
+    headers = {"User-Agent": "GameUpdateBot/1.0"}
+    async with sem:
+        try:
+            async with session.get(url, params={"q": "patch OR update", "sort": "new", "restrict_sr": "on", "limit": 3, "t": "month"}, headers=headers, timeout=aiohttp.ClientTimeout(total=8)) as r:
+                if r.status != 200:
+                    return None, None, None
+                data = await r.json()
+                posts = data.get("data", {}).get("children", [])
+                if not posts:
+                    return None, None, None
+                best = posts[0]["data"]
+                return best.get("created_utc", 0), f"https://reddit.com{best.get('permalink', '')}", best.get("title", "")
+        except:
+            return None, None, None
+
+async def fetch_all():
     now = time.time()
     sem = asyncio.Semaphore(15)
     results = []
     async with aiohttp.ClientSession() as session:
-        async def one(appid, name_tag):
+        async def one_steam(appid, name_tag):
             name, tag = name_tag
-            ck = f"u_{appid}"
+            ck = f"s_{appid}"
             if ck in CACHE and now - CACHE[ck]["ts"] < CACHE_TTL:
                 ts, url, title = CACHE[ck]["data"]
             else:
-                ts, url, title = await do_fetch(appid, session, sem)
+                ts, url, title = await fetch_steam(appid, session, sem)
                 CACHE[ck] = {"ts": now, "data": (ts, url, title)}
-            results.append({"name": name, "tag": tag, "appid": appid, "ts": ts, "url": url, "title": title})
-        await asyncio.gather(*[one(aid, nt) for aid, nt in GAMES.items()])
+            results.append({"id": appid, "name": name, "tag": tag, "ts": ts, "url": url, "title": title, "src": "steam"})
+
+        async def one_reddit(key, info):
+            name, sub, tag = info
+            ck = f"r_{key}"
+            if ck in CACHE and now - CACHE[ck]["ts"] < CACHE_TTL:
+                ts, url, title = CACHE[ck]["data"]
+            else:
+                ts, url, title = await fetch_reddit(key, sub, session, sem)
+                CACHE[ck] = {"ts": now, "data": (ts, url, title)}
+            results.append({"id": key, "name": name, "tag": tag, "ts": ts, "url": url, "title": title, "src": "reddit"})
+
+        coros = [one_steam(aid, nt) for aid, nt in STEAM.items()]
+        coros += [one_reddit(k, v) for k, v in NON_STEAM.items()]
+        await asyncio.gather(*coros)
     return results
 
 def fmt(ts):
@@ -163,19 +203,13 @@ def fmt(ts):
     if diff.days == 0:
         h = diff.seconds // 3600
         m = (diff.seconds % 3600) // 60
-        if h:
-            return f"{h}h"
-        if m:
-            return f"{m}m"
+        if h: return f"{h}h"
+        if m: return f"{m}m"
         return "now"
-    if diff.days == 1:
-        return "1d"
-    if diff.days < 7:
-        return f"{diff.days}d"
-    if diff.days < 30:
-        return f"{diff.days//7}w"
-    if diff.days < 365:
-        return dt.strftime("%b %d")
+    if diff.days == 1: return "1d"
+    if diff.days < 7: return f"{diff.days}d"
+    if diff.days < 30: return f"{diff.days//7}w"
+    if diff.days < 365: return dt.strftime("%b %d")
     return dt.strftime("%b %Y")
 
 def build_board(results):
@@ -187,45 +221,33 @@ def build_board(results):
     older = [r for r in results if r["ts"] and (now_ts - r["ts"]) >= 604800]
     none = [r for r in results if not r["ts"]]
 
-    def format_list(items, icon):
-        if not items:
-            return []
+    def fmt_list(items, icon):
         lines = []
-        for i, r in enumerate(items):
+        for r in items:
             cat = CAT_ICONS.get(r["tag"], "")
-            lines.append(f"{icon} `{fmt(r['ts']):>5}` {cat} **{r['name']}**")
+            src = "  \U0001f310" if r.get("src") == "reddit" else ""
+            lines.append(f"{icon} `{fmt(r['ts']):>5}` {cat} **{r['name']}**{src}")
         return lines
 
     embeds = []
 
-    recent_lines = format_list(today, "\U0001f7e2") + format_list(week, "\U0001f7e1")
-    if recent_lines:
-        desc = "\n".join(recent_lines[:60])
-        if len(recent_lines) > 60:
-            desc += f"\n*...and {len(recent_lines)-60} more*"
-        embed = discord.Embed(
-            title="Recently Updated",
-            description=desc,
-            color=0x3fb950,
-            timestamp=datetime.now(timezone.utc),
-        )
-        embeds.append(embed)
+    recent = fmt_list(today, "\U0001f7e2") + fmt_list(week, "\U0001f7e1")
+    if recent:
+        desc = "\n".join(recent[:60])
+        if len(recent) > 60:
+            desc += f"\n*...and {len(recent)-60} more*"
+        embeds.append(discord.Embed(title="Recently Updated", description=desc, color=0x3fb950, timestamp=datetime.now(timezone.utc)))
 
-    other_lines = format_list(older, "\U0001f534") + format_list(none, "\u26ab")
-    if other_lines:
-        for i in range(0, len(other_lines), 75):
-            chunk = other_lines[i:i+75]
-            is_last = i + 75 >= len(other_lines)
-            embed = discord.Embed(
-                title="All Games" if i == 0 else "",
-                description="\n".join(chunk),
-                color=0x30363d,
-            )
-            if is_last:
-                embed.set_footer(text=f"{len(results)} games | updates every 10 min")
+    rest = fmt_list(older, "\U0001f534") + fmt_list(none, "\u26ab")
+    if rest:
+        for i in range(0, len(rest), 75):
+            chunk = rest[i:i+75]
+            embed = discord.Embed(title="All Games" if i == 0 else "", description="\n".join(chunk), color=0x30363d)
+            if i + 75 >= len(rest):
+                embed.set_footer(text=f"{len(results)} games | \U0001f310 = Reddit source | updates every 10 min")
             embeds.append(embed)
 
-    return embeds if embeds else [discord.Embed(title="No data", description="Fetching...", color=0x30363d)]
+    return embeds or [discord.Embed(title="No data", description="Fetching...", color=0x30363d)]
 
 @bot.event
 async def on_ready():
@@ -237,12 +259,12 @@ async def on_ready():
     print("Ready.")
 
 async def prefetch():
-    print("Prefetching game data...")
+    print("Prefetching all games...")
     t0 = time.time()
-    await fetch_games()
-    print(f"Prefetch done in {time.time()-t0:.1f}s")
+    r = await fetch_all()
+    print(f"Prefetch: {sum(1 for x in r if x['ts'])}/{len(r)} games in {time.time()-t0:.1f}s")
 
-@bot.tree.command(name="ping", description="Check if bot is online")
+@bot.tree.command(name="ping", description="Check bot status")
 async def ping_cmd(interaction: discord.Interaction):
     await interaction.response.send_message("pong", ephemeral=True)
 
@@ -250,7 +272,7 @@ async def ping_cmd(interaction: discord.Interaction):
 async def updates_cmd(interaction: discord.Interaction, game: str = None):
     await interaction.response.defer()
     try:
-        results = await fetch_games()
+        results = await fetch_all()
         if game:
             q = game.lower()
             results = [r for r in results if q in r["name"].lower()]
@@ -263,11 +285,11 @@ async def updates_cmd(interaction: discord.Interaction, game: str = None):
         await interaction.followup.send(f"Error: {e}")
         import traceback; traceback.print_exc()
 
-@bot.tree.command(name="latest", description="Details for a specific game")
+@bot.tree.command(name="latest", description="Details for a game")
 async def latest_cmd(interaction: discord.Interaction, game: str):
     await interaction.response.defer()
     try:
-        results = await fetch_games()
+        results = await fetch_all()
         q = game.lower()
         matches = [(r, s) for r in results if (s := _score(q, r["name"].lower())) > 0]
         matches.sort(key=lambda x: x[1], reverse=True)
@@ -275,15 +297,16 @@ async def latest_cmd(interaction: discord.Interaction, game: str):
             await interaction.followup.send(f"No game matching `{game}`.")
             return
         r = matches[0][0]
+        src = "Reddit" if r.get("src") == "reddit" else "Steam"
         embed = discord.Embed(
             title=f"{CAT_ICONS.get(r['tag'],'')} {r['name']}",
-            description=f"Last update: **{fmt(r['ts'])}**",
+            description=f"Source: {src}\nLast update: **{fmt(r['ts'])}**",
             color=0x1f6feb,
         )
         if r["url"]:
             embed.add_field(name="Link", value=r["url"], inline=False)
         if r["title"]:
-            embed.add_field(name="Latest News", value=r["title"][:256], inline=False)
+            embed.add_field(name="Latest", value=r["title"][:256], inline=False)
         await interaction.followup.send(embed=embed)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
@@ -295,12 +318,12 @@ def _score(q, n):
     if q in n: return 70
     return sum(20 for w in q.split() if any(w in nw for nw in n.split()))
 
-@bot.tree.command(name="pinboard", description="Create the auto-updating status board")
+@bot.tree.command(name="pinboard", description="Create auto-updating status board")
 @commands.has_permissions(manage_messages=True)
 async def pinboard_cmd(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        results = await fetch_games()
+        results = await fetch_all()
         embeds = build_board(results)
         msg = await interaction.channel.send(embeds=embeds[:10])
         try:
@@ -310,8 +333,7 @@ async def pinboard_cmd(interaction: discord.Interaction):
         cfg = load_config()
         cfg["channel_id"] = interaction.channel_id
         cfg["message_id"] = msg.id
-        cfg["message_count"] = len(embeds)
-        cfg["last_ts"] = {r["appid"]: r["ts"] or 0 for r in results}
+        cfg["last_ts"] = {r["id"]: r["ts"] or 0 for r in results}
         save_config(cfg)
         await interaction.followup.send("Board pinned. Auto-updates every 10 min.")
     except Exception as e:
@@ -324,15 +346,29 @@ async def stopboard_cmd(interaction: discord.Interaction):
     save_config({})
     await interaction.response.send_message("Stopped.")
 
-@bot.tree.command(name="search", description="Search tracked games")
+@bot.tree.command(name="search", description="Search all tracked games")
 async def search_cmd(interaction: discord.Interaction, name: str):
     q = name.lower()
-    matches = [(n, t) for aid, (n, t) in GAMES.items() if q in n.lower()]
+    matches = []
+    for key, (n, t) in STEAM.items():
+        if q in n.lower():
+            matches.append((n, t, "Steam"))
+    for key, (n, sub, t) in NON_STEAM.items():
+        if q in n.lower():
+            matches.append((n, t, "Reddit"))
     if not matches:
         await interaction.response.send_message("No matches.")
         return
-    lines = [f"{CAT_ICONS.get(t,'')} {n}" for n, t in sorted(matches)[:25]]
+    lines = [f"{CAT_ICONS.get(t,'')} {n} ({src})" for n, t, src in sorted(matches)[:25]]
     await interaction.response.send_message("**Games:**\n" + "\n".join(lines))
+
+@bot.tree.command(name="refresh", description="Clear cache and re-fetch all data")
+async def refresh_cmd(interaction: discord.Interaction):
+    await interaction.response.defer()
+    CACHE.clear()
+    results = await fetch_all()
+    ok = sum(1 for r in results if r["ts"])
+    await interaction.followup.send(f"Cache cleared. Fetched {ok}/{len(results)} games fresh.")
 
 @tasks.loop(minutes=10)
 async def pinned_updater():
@@ -349,29 +385,28 @@ async def pinned_updater():
     except:
         return
 
-    results = await fetch_games()
+    results = await fetch_all()
     cfg = load_config()
     last_ts = cfg.get("last_ts", {})
 
     alerts = []
     for r in results:
-        appid = r["appid"]
+        rid = r["id"]
         ts = r["ts"] or 0
-        prev = last_ts.get(appid, 0)
+        prev = last_ts.get(rid, 0)
         if ts > prev and prev > 0:
             cat = CAT_ICONS.get(r["tag"], "")
             alerts.append(f"{cat} **{r['name']}** updated ({fmt(ts)})")
-        last_ts[appid] = ts
+        last_ts[rid] = ts
 
     embeds = build_board(results)
-    await pinned_msg.edit(embeds=embeds[:10])
+    try:
+        await pinned_msg.edit(embeds=embeds[:10])
+    except Exception as e:
+        print(f"Edit error: {e}")
 
     if alerts:
-        alert_embed = discord.Embed(
-            title="\U0001f514 New Updates",
-            description="\n".join(alerts[:20]),
-            color=0x3fb950,
-        )
+        alert_embed = discord.Embed(title="\U0001f514 New Updates", description="\n".join(alerts[:20]), color=0x3fb950)
         await channel.send(embed=alert_embed, delete_after=600)
 
     cfg["last_ts"] = last_ts
@@ -383,7 +418,7 @@ async def _():
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("No DISCORD_TOKEN found in .env.")
+        print("No DISCORD_TOKEN found.")
         exit(1)
     print("Starting...")
     bot.run(TOKEN, log_handler=None)
