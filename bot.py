@@ -1,5 +1,4 @@
-import os, time, asyncio, json, threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import os, time, asyncio, json, traceback
 from datetime import datetime, timezone
 
 import discord
@@ -10,75 +9,29 @@ TOKEN = os.getenv("DISCORD_TOKEN", "")
 CONFIG_FILE = os.getenv("CONFIG_FILE", "bot_config.json")
 
 GAMES = {
-    "730": "CS2",
-    "1172470": "Apex Legends",
-    "271590": "GTA V",
-    "1938090": "Call of Duty",
-    "578080": "PUBG",
-    "252490": "Rust",
-    "440": "Team Fortress 2",
-    "236390": "War Thunder",
-    "230410": "Warframe",
-    "359550": "R6 Siege",
-    "381210": "Dead by Daylight",
-    "594650": "Hunt: Showdown",
-    "1623730": "Palworld",
-    "2923300": "FragPunk",
-    "1693980": "Deadlock",
-    "221100": "DayZ",
-    "2507950": "Delta Force",
-    "252950": "Rocket League",
-    "2767030": "Marvel Rivals",
-    "1172620": "Sea of Thieves",
-    "393380": "SQUAD",
-    "513710": "Scum",
-    "872200": "Rogue Company",
-    "2479810": "Gray Zone Warfare",
-    "760160": "Bloodhunt",
-    "671860": "BattleBit",
-    "761890": "Albion Online",
-    "1067180": "Stalcraft",
-    "2338310": "The First Descendant",
-    "2826790": "PIONER",
-    "2819640": "ARC Raiders",
-    "2381850": "Arena Breakout",
-    "2015270": "Dark and Darker",
-    "686810": "Hell Let Loose",
-    "1874880": "Arma Reforger",
-    "107410": "Arma 3",
-    "304930": "Unturned",
-    "376210": "The Isle",
-    "581320": "Insurgency: Sandstorm",
-    "1144200": "Ready or Not",
-    "2406770": "Bodycam",
-    "674020": "World War 3",
-    "1517290": "Battlefield 2042",
-    "1238810": "Battlefield V",
-    "1238840": "Battlefield 1",
-    "1174180": "RDR2",
-    "945360": "Among Us",
-    "2221490": "The Division 2",
-    "440900": "Conan Exiles",
-    "1203220": "Naraka",
-    "2399830": "ARK Ascended",
-    "346110": "ARK Evolved",
-    "2357570": "Overwatch 2",
-    "2686150": "The Finals",
-    "1928420": "Farlight 84",
-    "895400": "Deadside",
-    "2318300": "Dune: Awakening",
-    "2873710": "SMITE 2",
-    "291480": "Warface",
-    "108600": "Project Zomboid",
-    "1237950": "Battlefront II",
-    "238960": "Path of Exile",
-    "2694490": "Path of Exile 2",
-    "2668510": "Snowbreak",
-    "2358720": "Black Myth Wukong",
-    "1245620": "ELDEN RING",
-    "1086940": "Baldur's Gate 3",
-    "553850": "HELLDIVERS 2",
-    "2246340": "Monster Hunter Wilds",
+    "730": "CS2", "1172470": "Apex Legends", "271590": "GTA V",
+    "1938090": "Call of Duty", "578080": "PUBG", "252490": "Rust",
+    "440": "TF2", "236390": "War Thunder", "230410": "Warframe",
+    "359550": "R6 Siege", "381210": "Dead by Daylight", "594650": "Hunt: Showdown",
+    "1623730": "Palworld", "2923300": "FragPunk", "1693980": "Deadlock",
+    "221100": "DayZ", "2507950": "Delta Force", "252950": "Rocket League",
+    "2767030": "Marvel Rivals", "1172620": "Sea of Thieves", "393380": "SQUAD",
+    "513710": "Scum", "872200": "Rogue Company", "2479810": "Gray Zone Warfare",
+    "760160": "Bloodhunt", "671860": "BattleBit", "761890": "Albion Online",
+    "1067180": "Stalcraft", "2338310": "The First Descendant", "2826790": "PIONER",
+    "2819640": "ARC Raiders", "2381850": "Arena Breakout", "2015270": "Dark and Darker",
+    "686810": "Hell Let Loose", "1874880": "Arma Reforger", "107410": "Arma 3",
+    "304930": "Unturned", "376210": "The Isle", "581320": "Insurgency: Sandstorm",
+    "1144200": "Ready or Not", "2406770": "Bodycam", "674020": "World War 3",
+    "1517290": "Battlefield 2042", "1238810": "Battlefield V", "1238840": "Battlefield 1",
+    "1174180": "RDR2", "945360": "Among Us", "2221490": "The Division 2",
+    "440900": "Conan Exiles", "1203220": "Naraka", "2399830": "ARK Ascended",
+    "346110": "ARK Evolved", "2357570": "Overwatch 2", "2686150": "The Finals",
+    "1928420": "Farlight 84", "895400": "Deadside", "2318300": "Dune: Awakening",
+    "2873710": "SMITE 2", "291480": "Warface", "108600": "Project Zomboid",
+    "1237950": "Battlefront II", "238960": "Path of Exile", "2694490": "Path of Exile 2",
+    "2668510": "Snowbreak", "2358720": "Black Myth Wukong", "1245620": "ELDEN RING",
+    "1086940": "Baldur's Gate 3", "553850": "HELLDIVERS 2", "2246340": "Monster Hunter Wilds",
     "1145360": "Hades II",
 }
 
@@ -93,20 +46,38 @@ def load_config():
         return {}
 
 def save_config(cfg):
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(cfg, f)
+    try:
+        with open(CONFIG_FILE, "w") as f:
+            json.dump(cfg, f)
+    except Exception:
+        pass
 
 intents = discord.Intents.default()
-intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
-http_session = None
-semaphore = asyncio.Semaphore(10)
+_session = None
+_sem = None
+
+def get_session():
+    global _session
+    if _session is None or _session.closed:
+        _session = aiohttp.ClientSession()
+    return _session
+
+def get_sem():
+    global _sem
+    if _sem is None:
+        _sem = asyncio.Semaphore(10)
+    return _sem
 
 async def fetch_latest(appid):
     url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
     try:
-        async with semaphore:
-            async with http_session.get(url, params={"appid": appid, "count": 1, "maxlength": 1, "format": "json"}, timeout=aiohttp.ClientTimeout(total=5)) as r:
+        async with get_sem():
+            async with get_session().get(
+                url,
+                params={"appid": appid, "count": 1, "maxlength": 1, "format": "json"},
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as r:
                 if r.status != 200:
                     return None, None
                 data = await r.json()
@@ -164,12 +135,7 @@ def fmt(ts):
 def build_embed(results, title="Game Updates"):
     results = sorted(results, key=lambda x: x["ts"] or 0, reverse=True)
 
-    emojis = {
-        "today": "🟢",
-        "recent": "🟡",
-        "old": "🔴",
-        "none": "⚫",
-    }
+    emojis = {"today": "🟢", "recent": "🟡", "old": "🔴", "none": "⚫"}
 
     fields = []
     for r in results:
@@ -195,23 +161,33 @@ def build_embed(results, title="Game Updates"):
     embed = discord.Embed(title=title, color=0x1f6feb, timestamp=datetime.now(timezone.utc))
     embed.add_field(name="\u200b", value=left_str or "\u200b", inline=True)
     embed.add_field(name="\u200b", value=right_str or "\u200b", inline=True)
-    embed.set_footer(text=f"Updates every 10 min • {len(results)} games • 🟢 <1d  🟡 <1w  🔴 older  ⚫ none")
+    embed.set_footer(text=f"Updates every 10 min | {len(results)} games | 🟢 <1d  🟡 <1w  🔴 older  ⚫ none")
     return embed
 
-# ---------- bot events ----------
+# ---------- Events ----------
 @bot.event
 async def on_ready():
-    global http_session
-    http_session = aiohttp.ClientSession()
     print(f"Logged in as {bot.user}")
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash commands")
+        for cmd in synced:
+            print(f"  /{cmd.name}")
     except Exception as e:
         print(f"Sync error: {e}")
+        traceback.print_exc()
     pinned_updater.start()
 
-# ---------- slash commands ----------
+# ---------- Commands ----------
+@bot.tree.command(name="ping", description="Check if bot is alive and API works")
+async def cmd_ping(interaction: discord.Interaction):
+    await interaction.response.defer()
+    t0 = time.time()
+    results = await fetch_all()
+    ok = sum(1 for r in results if r["ts"])
+    elapsed = time.time() - t0
+    await interaction.followup.send(f"Online. {ok}/{len(results)} games fetched in {elapsed:.1f}s. Use `/pinboard` to create the status board.")
+
 @bot.tree.command(name="updates", description="Show latest game updates")
 async def cmd_updates(interaction: discord.Interaction, game: str = None):
     await interaction.response.defer()
@@ -242,8 +218,6 @@ async def cmd_latest(interaction: discord.Interaction, game: str):
     embed = discord.Embed(title=r["name"], description=f"Last update: **{fmt(r['ts'])}**", color=0x1f6feb)
     if r["url"]:
         embed.add_field(name="Patch Notes", value=r["url"], inline=False)
-    else:
-        embed.add_field(name="Status", value="No data", inline=False)
     await interaction.followup.send(embed=embed)
 
 def _score(q, n):
@@ -257,22 +231,18 @@ def _score(q, n):
 async def cmd_pinboard(interaction: discord.Interaction):
     await interaction.response.defer()
     results = await fetch_all()
-
     embed = build_embed(results, "Game Update Status")
     msg = await interaction.channel.send(embed=embed)
-
     try:
         await msg.pin()
     except Exception:
         pass
-
     cfg = load_config()
     cfg["channel_id"] = interaction.channel_id
     cfg["message_id"] = msg.id
     cfg["last_ts"] = {r["appid"]: r["ts"] or 0 for r in results}
     save_config(cfg)
-
-    await interaction.followup.send("Board pinned and auto-updating every 10 min.")
+    await interaction.followup.send("Board pinned. Auto-updating every 10 min.")
 
 @bot.tree.command(name="stopboard", description="Stop the auto-updating board")
 @commands.has_permissions(manage_messages=True)
@@ -292,7 +262,7 @@ async def cmd_search(interaction: discord.Interaction, name: str):
         return
     await interaction.response.send_message("**Games:**\n" + "\n".join(f"• {m}" for m in sorted(matches)[:25]))
 
-# ---------- background pinned-updater ----------
+# ---------- Background pinned-updater ----------
 @tasks.loop(minutes=10)
 async def pinned_updater():
     cfg = load_config()
@@ -300,22 +270,16 @@ async def pinned_updater():
     mid = cfg.get("message_id", 0)
     if not cid or not mid:
         return
-
     channel = bot.get_channel(cid)
     if not channel:
         return
-
     try:
         pinned_msg = await channel.fetch_message(mid)
     except Exception:
         return
-
-    async with aiohttp.ClientSession() as session:
-        results = await fetch_all()
-
+    results = await fetch_all()
     cfg = load_config()
     last_ts = cfg.get("last_ts", {})
-
     alerts = []
     for r in results:
         appid = r["appid"]
@@ -324,18 +288,10 @@ async def pinned_updater():
         if ts > prev and prev > 0:
             alerts.append(f"**{r['name']}** updated — {fmt(ts)}")
         last_ts[appid] = ts
-
     embed = build_embed(results, "Game Update Status")
     await pinned_msg.edit(content=None, embed=embed)
-
     if alerts:
-        alert_embed = discord.Embed(
-            title="New Updates Detected",
-            description="\n".join(alerts),
-            color=0x3fb950,
-        )
-        await channel.send(embed=alert_embed, delete_after=600)
-
+        await channel.send(embed=discord.Embed(title="New Updates Detected", description="\n".join(alerts), color=0x3fb950), delete_after=600)
     cfg["last_ts"] = last_ts
     save_config(cfg)
 
@@ -343,7 +299,7 @@ async def pinned_updater():
 async def before_pinned():
     await bot.wait_until_ready()
 
-# ---------- restart loop ----------
+# ---------- Run ----------
 MAX_RETRIES = 5
 RETRY_DELAY = 30
 
@@ -359,7 +315,7 @@ def run_bot():
             retries += 1
             print(f"Connection lost ({e}). Retry {retries}/{MAX_RETRIES} in {RETRY_DELAY}s...")
             if retries >= MAX_RETRIES:
-                print("Max retries reached. Exiting.")
+                print("Max retries. Exiting.")
                 break
             time.sleep(RETRY_DELAY)
         else:
@@ -367,7 +323,9 @@ def run_bot():
 
 if __name__ == "__main__":
     if not TOKEN:
-        TOKEN = os.getenv("DISCORD_TOKEN", "")
+        tok = os.getenv("DISCORD_TOKEN", "")
+        if tok:
+            TOKEN = tok
     if not TOKEN:
         print("Paste your Discord bot token:")
         TOKEN = input("> ").strip()
@@ -377,7 +335,8 @@ if __name__ == "__main__":
 
     PORT = int(os.getenv("PORT", "8080"))
 
-    class HealthHandler(BaseHTTPRequestHandler):
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    class H(BaseHTTPRequestHandler):
         def do_GET(self):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
@@ -386,9 +345,10 @@ if __name__ == "__main__":
         def log_message(self, *a):
             pass
 
-    httpd = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    import threading
+    httpd = HTTPServer(("0.0.0.0", PORT), H)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    print(f"Health check server on port {PORT}")
+    print(f"Health server on port {PORT}")
 
-    print("Starting bot (auto-restarts on disconnect)...")
+    print("Starting bot...")
     run_bot()
