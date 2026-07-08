@@ -111,6 +111,7 @@ CAT_ICONS = {
     "horde": "\U0001f41b", "rogue": "\U0001f3b2", "party": "\U0001f389",
     "rpg": "\U0001f4dc", "dungeon": "\U0001f9d9", "gacha": "\U0001f3b0",
     "adventure": "\u26f5",
+    "other": "\U0001f3ae",
 }
 
 GAME_TAGS = {}
@@ -136,6 +137,7 @@ for d in [STEAM, NON_STEAM]:
         elif "rpg" in name.lower() or "baldur" in name.lower(): t = "rpg"
         elif "adventure" in name.lower() or "sea of" in name.lower(): t = "adventure"
         elif "horde" in name.lower() or "helldiver" in name.lower(): t = "horde"
+        else: t = "other"
         GAME_TAGS[name] = t
 
 CACHE = {}
