@@ -166,6 +166,9 @@ def save_builds():
     try: json.dump(BUILD_STORE, open(BUILD_STORE_FILE, "w"))
     except: pass
 
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 async def src_steam_build(appid, session, sem):
     """Tracks build version changes via UpToDateCheck. Returns timestamp of change if version differs from last known."""
     async with sem:
