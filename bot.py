@@ -113,39 +113,36 @@ CAT_ICONS = {
     "adventure": "\u26f5",
 }
 
-GAME_TAGS = {
-    "CS2": "fps", "Apex Legends": "br", "GTA V": "openworld", "Call of Duty": "fps",
-    "PUBG": "br", "Rust": "survival", "TF2": "fps", "War Thunder": "sim",
-    "Warframe": "looter", "R6 Siege": "fps", "Dead by Daylight": "horror",
-    "Hunt: Showdown": "fps", "Palworld": "survival", "FragPunk": "fps",
-    "Deadlock": "moba", "DayZ": "survival", "Delta Force": "fps",
-    "Rocket League": "sports", "Marvel Rivals": "hero", "Sea of Thieves": "adventure",
-    "SQUAD": "fps", "Scum": "survival", "Rogue Company": "fps",
-    "Gray Zone Warfare": "fps", "BattleBit": "fps", "Albion Online": "mmo",
-    "Stalcraft": "mmo", "The First Descendant": "looter", "ARC Raiders": "survival",
-    "Dark and Darker": "dungeon", "Hell Let Loose": "fps", "Arma Reforger": "sim",
-    "Arma 3": "sim", "Unturned": "survival", "The Isle": "survival",
-    "Insurgency Sandstorm": "fps", "Ready or Not": "fps", "Bodycam": "fps",
-    "Battlefield 2042": "fps", "Battlefield V": "fps", "Battlefield 1": "fps",
-    "RDR2": "openworld", "Among Us": "party", "The Division 2": "looter",
-    "Conan Exiles": "survival", "Naraka": "br", "ARK Ascended": "survival",
-    "ARK Evolved": "survival", "Overwatch 2": "hero", "The Finals": "fps",
-    "Farlight 84": "br", "Deadside": "survival", "Dune Awakening": "mmo",
-    "SMITE 2": "moba", "Warface": "fps", "Project Zomboid": "survival",
-    "Battlefront II": "fps", "Path of Exile": "arpg", "Path of Exile 2": "arpg",
-    "Snowbreak": "gacha", "Black Myth Wukong": "arpg", "ELDEN RING": "arpg",
-    "Baldurs Gate 3": "rpg", "HELLDIVERS 2": "horde", "MH Wilds": "arpg",
-    "Hades II": "rogue", "PIONER": "mmo", "Arena Breakout": "fps",
-    "Valorant": "br", "Fortnite": "br", "Tarkov": "fps", "Genshin Impact": "gacha",
-    "Honkai Star Rail": "gacha", "Wuthering Waves": "gacha",
-    "Zenless Zone Zero": "gacha", "Minecraft": "survival", "Roblox": "party",
-    "osu!": "sports", "LoL": "moba", "FiveM": "openworld", "Chess": "party",
-}
+GAME_TAGS = {}
+for d in [STEAM, NON_STEAM]:
+    for k, v in d.items():
+        name = v[0]
+        if "fps" in name.lower() or "call of duty" in name.lower() or "battlefield" in name.lower() or "counter" in name.lower(): t = "fps"
+        elif "br" in name.lower() or "apex" in name.lower() or "pubg" in name.lower() or "fortnite" in name.lower() or "valorant" in name.lower(): t = "br"
+        elif "survival" in name.lower() or "rust" in name.lower() or "dayz" in name.lower() or "ark" in name.lower(): t = "survival"
+        elif "mmo" in name.lower() or "albion" in name.lower() or "stalcraft" in name.lower(): t = "mmo"
+        elif "moba" in name.lower() or "deadlock" in name.lower() or "smite" in name.lower() or "lol" in name.lower(): t = "moba"
+        elif "arpg" in name.lower() or "path of exile" in name.lower() or "elden ring" in name.lower() or "wukong" in name.lower(): t = "arpg"
+        elif "gacha" in name.lower() or "genshin" in name.lower() or "star rail" in name.lower() or "wuwa" in name.lower() or "zzz" in name.lower(): t = "gacha"
+        elif "hero" in name.lower() or "overwatch" in name.lower() or "marvel" in name.lower(): t = "hero"
+        elif "horror" in name.lower() or "dead by" in name.lower(): t = "horror"
+        elif "sports" in name.lower() or "rocket" in name.lower(): t = "sports"
+        elif "sim" in name.lower() or "war thunder" in name.lower() or "arma" in name.lower(): t = "sim"
+        elif "openworld" in name.lower() or "gta" in name.lower() or "rdr" in name.lower(): t = "openworld"
+        elif "looter" in name.lower() or "warframe" in name.lower() or "division" in name.lower(): t = "looter"
+        elif "dungeon" in name.lower() or "dark and darker" in name.lower(): t = "dungeon"
+        elif "party" in name.lower() or "among" in name.lower() or "roblox" in name.lower(): t = "party"
+        elif "rogue" in name.lower() or "hades" in name.lower(): t = "rogue"
+        elif "rpg" in name.lower() or "baldur" in name.lower(): t = "rpg"
+        elif "adventure" in name.lower() or "sea of" in name.lower(): t = "adventure"
+        elif "horde" in name.lower() or "helldiver" in name.lower(): t = "horde"
+        GAME_TAGS[name] = t
 
 CACHE = {}
-CACHE_TTL = 600
+STEAM_TTL = 120
+EXTERNAL_TTL = 600
 RSS_CACHE = {"data": None, "ts": 0}
-RSS_TTL = 1800
+_last_fetch_time = 0
 
 def load_config():
     try: return json.load(open(CONFIG_FILE))
@@ -166,7 +163,7 @@ async def src_steam(appid, session, sem):
             async with session.get(
                 "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/",
                 params={"appid": appid, "count": 1, "maxlength": 300, "format": "json"},
-                timeout=aiohttp.ClientTimeout(total=5),
+                timeout=aiohttp.ClientTimeout(total=4),
             ) as r:
                 if r.status == 200:
                     items = (await r.json()).get("appnews", {}).get("newsitems", [])
@@ -182,7 +179,7 @@ async def src_reddit(subreddit, session, sem):
             async with session.get(
                 f"https://www.reddit.com/r/{subreddit}/search.json",
                 params={"q": "patch OR update", "sort": "new", "restrict_sr": "on", "limit": 3, "t": "month"},
-                headers=headers, timeout=aiohttp.ClientTimeout(total=8),
+                headers=headers, timeout=aiohttp.ClientTimeout(total=6),
             ) as r:
                 if r.status == 200:
                     posts = (await r.json()).get("data", {}).get("children", [])
@@ -198,7 +195,7 @@ async def src_googlenews(query, session, sem):
             q = query.replace(" ", "+")
             async with session.get(
                 f"https://news.google.com/rss/search?q={q}+patch+update&hl=en-US&gl=US&ceid=US:en",
-                timeout=aiohttp.ClientTimeout(total=8),
+                timeout=aiohttp.ClientTimeout(total=6),
             ) as r:
                 if r.status == 200:
                     root = ElementTree.fromstring(await r.text())
@@ -215,9 +212,8 @@ async def src_googlenews(query, session, sem):
     return 0, "", "", "—"
 
 async def src_rss_feeds(session):
-    """Fetches major gaming RSS feeds, returns list of (game_name, ts, url, title)"""
-    now = time.time()
-    if RSS_CACHE["data"] is not None and now - RSS_CACHE["ts"] < RSS_TTL:
+    now_t = time.time()
+    if RSS_CACHE["data"] is not None and now_t - RSS_CACHE["ts"] < EXTERNAL_TTL:
         return RSS_CACHE["data"]
 
     feeds = [
@@ -231,7 +227,7 @@ async def src_rss_feeds(session):
     async def fetch_feed(url):
         async with sem:
             try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as r:
+                async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as r:
                     if r.status != 200: return
                     root = ElementTree.fromstring(await r.text())
                     for item in root.iter("item"):
@@ -240,10 +236,8 @@ async def src_rss_feeds(session):
                         pub = item.find("pubDate")
                         if title is None or pub is None: continue
                         ttext = (title.text or "").lower()
-                        # Check if article mentions any tracked game
                         for gid in ALL_GAME_NAMES:
-                            gname_lower = ALL_GAME_NAMES[gid]
-                            if gname_lower in ttext:
+                            if ALL_GAME_NAMES[gid] in ttext:
                                 try:
                                     for fmt_str in ["%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z", "%a, %d %b %Y %H:%M:%S +0000"]:
                                         try:
@@ -251,14 +245,13 @@ async def src_rss_feeds(session):
                                             break
                                         except: continue
                                     else: continue
-                                    ts = dt.timestamp()
-                                    results.append((gid, ts, link.text or "", title.text or "", "RSS"))
+                                    results.append((gid, dt.timestamp(), link.text or "", title.text or "", "RSS"))
                                 except: pass
             except: pass
 
     await asyncio.gather(*[fetch_feed(u) for u in feeds])
     RSS_CACHE["data"] = results
-    RSS_CACHE["ts"] = now
+    RSS_CACHE["ts"] = now_t
     return results
 
 ALL_GAME_NAMES = {}
@@ -270,8 +263,9 @@ for key, (name, query, sub) in NON_STEAM.items():
 # --- Fetch ---
 
 async def fetch_all():
-    now = time.time()
-    sem = asyncio.Semaphore(15)
+    global _last_fetch_time
+    now_t = time.time()
+    sem = asyncio.Semaphore(20)
     results = []
     lock = asyncio.Lock()
 
@@ -279,35 +273,35 @@ async def fetch_all():
         rss_matches = await src_rss_feeds(session)
 
         async def fetch_game(gid, name, tag, steam_id=None, reddit_sub=None, google_q=None):
-            # Check cache
             ck = f"g_{gid}"
-            async with lock:
-                if ck in CACHE and now - CACHE[ck]["ts"] < CACHE_TTL:
-                    results.append(CACHE[ck]["data"])
-                    return
+            cached = CACHE.get(ck)
+            if cached and now_t - cached["ts"] < STEAM_TTL:
+                async with lock: results.append(cached["data"])
+                return
 
-            # Fetch all sources in parallel
             s = [src_steam(steam_id, session, sem)] if steam_id else []
             r = [src_reddit(reddit_sub, session, sem)] if reddit_sub else []
             g = [src_googlenews(google_q or name, session, sem)]
+            all_s = await asyncio.gather(*(s + r + g))
 
-            all_sources = await asyncio.gather(*(s + r + g))
-
-            # Pick best
             best_ts, best_url, best_title, best_src = 0, "", "", "—"
-            for ts, url, title, src in all_sources:
+            for ts, url, title, src in all_s:
                 if ts > best_ts:
                     best_ts, best_url, best_title, best_src = ts, url, title, src
 
-            # Check RSS feeds
             for rid, rts, rurl, rtitle, rsrc in rss_matches:
                 if rid == gid and rts > best_ts:
                     best_ts, best_url, best_title, best_src = rts, rurl, rtitle, rsrc
 
+            # On subsequent fast ticks, reuse external source data from cache
+            if cached and now_t - cached["ts"] < EXTERNAL_TTL and best_src in ("Steam", "—"):
+                old = cached["data"]
+                if old["src"] not in ("Steam", "—") and old["ts"] > best_ts:
+                    best_ts, best_url, best_title, best_src = old["ts"], old["url"], old["title"], old["src"]
+
             entry = {"id": gid, "name": name, "tag": tag, "ts": best_ts or 0, "url": best_url, "title": best_title, "src": best_src}
             async with lock:
-                if ck not in CACHE or now - CACHE[ck]["ts"] >= CACHE_TTL:
-                    CACHE[ck] = {"ts": now, "data": entry}
+                CACHE[ck] = {"ts": now_t, "data": entry}
                 results.append(entry)
 
         coros = []
@@ -320,6 +314,7 @@ async def fetch_all():
 
         await asyncio.gather(*coros)
 
+    _last_fetch_time = time.time()
     return list({r["id"]: r for r in results}.values())
 
 def fmt(ts):
@@ -336,6 +331,14 @@ def fmt(ts):
     if diff.days < 30: return f"{diff.days//7}w"
     if diff.days < 365: return dt.strftime("%b %d")
     return dt.strftime("%b %Y")
+
+def rel_time(ts):
+    """Relative time in seconds for 'updated Xs ago'"""
+    if not ts: return "?"
+    secs = int(time.time() - ts)
+    if secs < 60: return f"{secs}s ago"
+    if secs < 3600: return f"{secs//60}m ago"
+    return f"{secs//3600}h ago"
 
 SRC_ICONS = {"Steam": "\U0001f3ae", "Reddit": "\U0001f4ac", "Web": "\U0001f310", "RSS": "\U0001f4f0", "—": ""}
 
@@ -370,7 +373,8 @@ def build_board(results):
             chunk = rest[i:i+75]
             embed = discord.Embed(title="All Games" if i == 0 else "", description="\n".join(chunk), color=0x30363d)
             if i + 75 >= len(rest):
-                embed.set_footer(text=f"{len(results)} games | \U0001f3ae=Steam \U0001f4ac=Reddit \U0001f310=GoogleNews \U0001f4f0=RSS | 10min")
+                ago = rel_time(_last_fetch_time) if _last_fetch_time else "?"
+                embed.set_footer(text=f"{len(results)} games | checked {ago} | \U0001f3ae=Steam \U0001f4ac=Reddit \U0001f310=Web \U0001f4f0=RSS")
             embeds.append(embed)
 
     return embeds or [discord.Embed(title="No data", description="Fetching...", color=0x30363d)]
@@ -384,7 +388,7 @@ async def on_ready():
     print(f"Synced {len(synced)} commands")
     pinned_updater.start()
     asyncio.create_task(prefetch())
-    print("Ready.")
+    print("Ready. Board updates every 2 min.")
 
 async def prefetch():
     print("Prefetching all sources...")
@@ -445,7 +449,7 @@ def _score(q, n):
     if q in n: return 70
     return sum(20 for w in q.split() if any(w in nw for nw in n.split()))
 
-@bot.tree.command(name="pinboard", description="Create auto-updating status board")
+@bot.tree.command(name="pinboard", description="Create auto-updating status board (2 min refresh)")
 @commands.has_permissions(manage_messages=True)
 async def pinboard_cmd(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -460,7 +464,7 @@ async def pinboard_cmd(interaction: discord.Interaction):
         cfg["message_id"] = msg.id
         cfg["last_ts"] = {r["id"]: r["ts"] or 0 for r in results}
         save_config(cfg)
-        await interaction.followup.send("Board pinned. Auto-updates every 10 min.")
+        await interaction.followup.send("Board pinned. Refreshes every **2 minutes**.")
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
         import traceback; traceback.print_exc()
@@ -494,9 +498,9 @@ async def refresh_cmd(interaction: discord.Interaction):
     ok = sum(1 for r in results if r["ts"])
     await interaction.followup.send(f"Cleared. Fetched {ok}/{len(results)} games fresh from all sources.")
 
-# --- Background ---
+# --- Background updater (2 min) ---
 
-@tasks.loop(minutes=10)
+@tasks.loop(minutes=2)
 async def pinned_updater():
     cfg = load_config()
     cid = cfg.get("channel_id", 0)
@@ -525,7 +529,7 @@ async def pinned_updater():
     except Exception as e: print(f"Edit error: {e}")
 
     if alerts:
-        await channel.send(embed=discord.Embed(title="\U0001f514 New Updates", description="\n".join(alerts[:20]), color=0x3fb950), delete_after=600)
+        await channel.send(embed=discord.Embed(title="\U0001f514 New Updates", description="\n".join(alerts[:20]), color=0x3fb950), delete_after=300)
 
     cfg["last_ts"] = last_ts
     save_config(cfg)
@@ -535,5 +539,5 @@ async def _(): await bot.wait_until_ready()
 
 if __name__ == "__main__":
     if not TOKEN: print("No DISCORD_TOKEN found."); exit(1)
-    print("Starting with Steam + Reddit + Google News + RSS feeds...")
+    print("Starting real-time bot (Steam: 2min, Other sources: 10min)...")
     bot.run(TOKEN, log_handler=None)
