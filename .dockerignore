@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+bot_config.json
+update_channel.json
+run_bot.bat
+run.bat
+.git/
+templates/
+app.py

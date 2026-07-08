@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+bot_config.json
+update_channel.json
+*.bat
+templates/
+app.py

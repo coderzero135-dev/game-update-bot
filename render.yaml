@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: game-update-bot
+    env: python
+    region: oregon
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    plan: free
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: CONFIG_FILE
+        value: /tmp/bot_config.json
+      - key: PORT
+        value: "8080"
