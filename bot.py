@@ -6,6 +6,16 @@ from discord.ext import commands, tasks
 import aiohttp
 
 TOKEN = os.getenv("DISCORD_TOKEN", "")
+if not TOKEN:
+    try:
+        with open(".env") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("DISCORD_TOKEN="):
+                    TOKEN = line.split("=", 1)[1].strip().strip('"').strip("'")
+                    break
+    except FileNotFoundError:
+        pass
 CONFIG_FILE = os.getenv("CONFIG_FILE", "bot_config.json")
 
 GAMES = {
@@ -317,15 +327,8 @@ def run_bot():
 
 if __name__ == "__main__":
     if not TOKEN:
-        tok = os.getenv("DISCORD_TOKEN", "")
-        if tok:
-            TOKEN = tok
-    if not TOKEN:
-        print("Paste your Discord bot token:")
-        TOKEN = input("> ").strip()
-        if not TOKEN:
-            print("No token provided.")
-            exit(1)
+        print("Set DISCORD_TOKEN in .env file or environment variable.")
+        exit(1)
 
     PORT = int(os.getenv("PORT", "8080"))
 

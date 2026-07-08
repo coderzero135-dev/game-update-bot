@@ -5,3 +5,4 @@ update_channel.json
 *.bat
 templates/
 app.py
+.env
