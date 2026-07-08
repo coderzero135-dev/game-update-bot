@@ -6,10 +6,9 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
     plan: free
+    healthCheckPath: /health
     envVars:
       - key: DISCORD_TOKEN
         sync: false
-      - key: CONFIG_FILE
-        value: /tmp/bot_config.json
       - key: PORT
         value: "8080"
