@@ -106,14 +106,14 @@ def fmt(ts):
     if diff.days == 0:
         h = diff.seconds // 3600
         m = (diff.seconds % 3600) // 60
-        if h: return f"{h}h {m}m ago"
-        if m: return f"{m}m ago"
+        if h: return f"{h}h"
+        if m: return f"{m}m"
         return "now"
-    if diff.days == 1: return "yesterday"
-    if diff.days < 7: return f"{diff.days}d ago"
-    if diff.days < 30: return f"{diff.days//7}w ago"
-    if diff.days < 365: return dt.strftime("%b %d")
-    return dt.strftime("%b %Y")
+    if diff.days == 1: return "1d"
+    if diff.days < 7: return f"{diff.days}d"
+    if diff.days < 30: return f"{diff.days//7}w"
+    if diff.days < 365: return dt.strftime("%b%d")
+    return dt.strftime("%b%Y")
 
 def build_embed(results, title="Game Updates"):
     results = sorted(results, key=lambda x: x["ts"] or 0, reverse=True)
@@ -126,12 +126,12 @@ def build_embed(results, title="Game Updates"):
         elif (now_ts - ts) < 604800: s = "\U0001f7e1"
         else: s = "\U0001f534"
         fields.append((s, r["name"], fmt(r["ts"])))
-    chunk_size = (len(fields) + 2) // 3
+    chunk_size = (len(fields) + 3) // 4
     cols = [fields[i:i+chunk_size] for i in range(0, len(fields), chunk_size)]
 
     embed = discord.Embed(title=title, color=0x1f6feb, timestamp=datetime.now(timezone.utc))
     for col in cols:
-        text = "\n".join(f"{s} `{w:<11}` **{n}**" for s, n, w in col)
+        text = "\n".join(f"{s} `{w:<5}` **{n}**" for s, n, w in col)
         embed.add_field(name="\u200b", value=text or "\u200b", inline=True)
     embed.set_footer(text=f"Updates every 10 min | {len(results)} games")
     return embed
