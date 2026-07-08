@@ -13,11 +13,10 @@ import aiohttp
 from config import (
     STEAM_CACHE_TTL,
     EXTERNAL_CACHE_TTL,
-    BUILD_CHECK_TTL,
     STEAM_SEMAPHORE,
     load_games,
 )
-from database import cache_get, cache_set, build_version_get, build_version_set
+from database import cache_get, cache_set, build_version_get, build_version_set, history_add
 
 logger = logging.getLogger(__name__)
 
@@ -153,6 +152,30 @@ async def source_build(
     return 0, "", "", "—"
 
 
+# --- Source: Steam Store Sales ---
+
+async def source_sale(
+    appid: str, session: aiohttp.ClientSession, sem: asyncio.Semaphore
+) -> tuple[int, str, str, str]:
+    async with sem:
+        try:
+            url = f"https://store.steampowered.com/api/appdetails?appids={appid}&filters=price_overview"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                if r.status != 200:
+                    return 0, "", "", "—"
+                data = await r.json()
+                app_data = data.get(appid, {}).get("data", {})
+                price = app_data.get("price_overview", {})
+                if not price or price.get("discount_percent", 0) == 0:
+                    return 0, "", "", "—"
+                pct = price["discount_percent"]
+                final = price.get("final_formatted", "")
+                return int(time.time()), f"https://store.steampowered.com/app/{appid}", f"**{pct}% off** — {final}", "Sale"
+        except Exception as e:
+            logger.debug("Sale check %s error: %s", appid, e)
+    return 0, "", "", "—"
+
+
 # --- Source: Gaming RSS Feeds ---
 
 _GAMING_RSS_CACHE: dict = {"data": None, "ts": 0}
@@ -257,6 +280,7 @@ async def fetch_all_games() -> list[dict]:
             if is_steam:
                 sources.append(source_steam(gid, session, steam_sem))
                 sources.append(source_build(gid, session, steam_sem))
+                sources.append(source_sale(gid, session, steam_sem))
                 sources.append(source_google_news(name, session, ext_sem))
             else:
                 sub = non_steam_reddit.get(gid)
@@ -295,6 +319,13 @@ async def fetch_all_games() -> list[dict]:
                 "src": best_src,
             }
             cache_set(ck, entry)
+
+            # Save to update history if it's a new update and has a title
+            if best_ts and best_title and best_src != "—":
+                prev = cached.get("ts", 0) if cached else 0
+                if best_ts > prev:
+                    history_add(gid, best_ts, best_title, best_url, best_src)
+
             async with lock:
                 results.append(entry)
 
