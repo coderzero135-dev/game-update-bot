@@ -1,22 +1,19 @@
-import os, time, asyncio, json, traceback
+import os
+
+TOKEN = os.getenv("DISCORD_TOKEN", "")
+for line in open(".env"):
+    if line.startswith("DISCORD_TOKEN="):
+        TOKEN = line.split("=", 1)[1].strip().strip('"').strip("'")
+        break
+
+import asyncio, time, json
 from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands, tasks
 import aiohttp
 
-TOKEN = os.getenv("DISCORD_TOKEN", "")
-if not TOKEN:
-    try:
-        with open(".env") as f:
-            for line in f:
-                line = line.strip()
-                if line.startswith("DISCORD_TOKEN="):
-                    TOKEN = line.split("=", 1)[1].strip().strip('"').strip("'")
-                    break
-    except FileNotFoundError:
-        pass
-CONFIG_FILE = os.getenv("CONFIG_FILE", "bot_config.json")
+CONFIG_FILE = "bot_config.json"
 
 GAMES = {
     "730": "CS2", "1172470": "Apex Legends", "271590": "GTA V",
@@ -28,8 +25,8 @@ GAMES = {
     "2767030": "Marvel Rivals", "1172620": "Sea of Thieves", "393380": "SQUAD",
     "513710": "Scum", "872200": "Rogue Company", "2479810": "Gray Zone Warfare",
     "760160": "Bloodhunt", "671860": "BattleBit", "761890": "Albion Online",
-    "1067180": "Stalcraft", "2338310": "The First Descendant", "2826790": "PIONER",
-    "2819640": "ARC Raiders", "2381850": "Arena Breakout", "2015270": "Dark and Darker",
+    "1067180": "Stalcraft", "2338310": "The First Descendant",
+    "2819640": "ARC Raiders", "2015270": "Dark and Darker",
     "686810": "Hell Let Loose", "1874880": "Arma Reforger", "107410": "Arma 3",
     "304930": "Unturned", "376210": "The Isle", "581320": "Insurgency: Sandstorm",
     "1144200": "Ready or Not", "2406770": "Bodycam", "674020": "World War 3",
@@ -41,8 +38,8 @@ GAMES = {
     "2873710": "SMITE 2", "291480": "Warface", "108600": "Project Zomboid",
     "1237950": "Battlefront II", "238960": "Path of Exile", "2694490": "Path of Exile 2",
     "2668510": "Snowbreak", "2358720": "Black Myth Wukong", "1245620": "ELDEN RING",
-    "1086940": "Baldur's Gate 3", "553850": "HELLDIVERS 2", "2246340": "Monster Hunter Wilds",
-    "1145360": "Hades II",
+    "1086940": "Baldurs Gate 3", "553850": "HELLDIVERS 2", "2246340": "Monster Hunter Wilds",
+    "1145360": "Hades II", "2826790": "PIONER", "2381850": "Arena Breakout",
 }
 
 CACHE = {}
@@ -52,24 +49,24 @@ def load_config():
     try:
         with open(CONFIG_FILE) as f:
             return json.load(f)
-    except Exception:
+    except:
         return {}
 
 def save_config(cfg):
     try:
         with open(CONFIG_FILE, "w") as f:
             json.dump(cfg, f)
-    except Exception:
+    except:
         pass
 
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-async def fetch_latest(appid):
+async def do_fetch(appid, session, sem):
     url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
-    try:
-        async with bot._sem:
-            async with bot._session.get(
+    async with sem:
+        try:
+            async with session.get(
                 url,
                 params={"appid": appid, "count": 1, "maxlength": 1, "format": "json"},
                 timeout=aiohttp.ClientTimeout(total=5),
@@ -81,146 +78,102 @@ async def fetch_latest(appid):
                 if not items:
                     return None, None
                 return items[0].get("date", 0), items[0].get("url", "")
-    except Exception as e:
-        print(f"  Steam fetch error ({appid}): {e}")
-        return None, None
+        except:
+            return None, None
 
-async def fetch_all():
+async def fetch_games():
     now = time.time()
-    results = []
+    sem = asyncio.Semaphore(10)
+    async with aiohttp.ClientSession() as session:
+        async def one(appid, name):
+            ck = f"u_{appid}"
+            if ck in CACHE and now - CACHE[ck]["ts"] < CACHE_TTL:
+                ts, url = CACHE[ck]["data"]
+            else:
+                ts, url = await do_fetch(appid, session, sem)
+                CACHE[ck] = {"ts": now, "data": (ts, url)}
+            return {"name": name, "appid": appid, "ts": ts, "url": url}
 
-    async def one(appid, name):
-        ck = f"u_{appid}"
-        if ck in CACHE and now - CACHE[ck]["ts"] < CACHE_TTL:
-            ts, url = CACHE[ck]["data"]
-        else:
-            ts, url = await fetch_latest(appid)
-            CACHE[ck] = {"ts": now, "data": (ts, url)}
-        results.append({"name": name, "appid": appid, "ts": ts, "url": url})
-
-    coros = [one(aid, name) for aid, name in GAMES.items()]
-    print(f"Fetching updates for {len(coros)} games...")
-    t0 = time.time()
-    try:
-        await asyncio.wait_for(asyncio.gather(*coros), timeout=30)
-    except asyncio.TimeoutError:
-        print("Fetch timed out after 30s")
-    elapsed = time.time() - t0
-    ok = sum(1 for r in results if r["ts"])
-    print(f"Done: {ok}/{len(GAMES)} games in {elapsed:.1f}s")
-    return results
+        coros = [one(aid, name) for aid, name in GAMES.items()]
+        return await asyncio.gather(*coros)
 
 def fmt(ts):
     if not ts:
-        return "—"
+        return "--"
     dt = datetime.fromtimestamp(ts, tz=timezone.utc)
     now_t = datetime.now(timezone.utc)
     diff = now_t - dt
     if diff.days == 0:
         h = diff.seconds // 3600
         m = (diff.seconds % 3600) // 60
-        if h:
-            return f"{h}h {m}m ago"
-        if m:
-            return f"{m}m ago"
+        if h: return f"{h}h {m}m ago"
+        if m: return f"{m}m ago"
         return "now"
-    if diff.days == 1:
-        return "yesterday"
-    if diff.days < 7:
-        return f"{diff.days}d ago"
-    if diff.days < 30:
-        return f"{diff.days // 7}w ago"
-    if diff.days < 365:
-        return dt.strftime("%b %d")
+    if diff.days == 1: return "yesterday"
+    if diff.days < 7: return f"{diff.days}d ago"
+    if diff.days < 30: return f"{diff.days//7}w ago"
+    if diff.days < 365: return dt.strftime("%b %d")
     return dt.strftime("%b %Y")
 
 def build_embed(results, title="Game Updates"):
     results = sorted(results, key=lambda x: x["ts"] or 0, reverse=True)
-
-    emojis = {"today": "🟢", "recent": "🟡", "old": "🔴", "none": "⚫"}
-
     fields = []
     for r in results:
         ts = r["ts"] or 0
         now_ts = datetime.now(timezone.utc).timestamp()
-        if ts == 0:
-            status = emojis["none"]
-        elif (now_ts - ts) < 86400:
-            status = emojis["today"]
-        elif (now_ts - ts) < 604800:
-            status = emojis["recent"]
-        else:
-            status = emojis["old"]
-        fields.append((status, r["name"], fmt(r["ts"])))
-
+        if ts == 0: s = "\u26ab"
+        elif (now_ts - ts) < 86400: s = "\U0001f7e2"
+        elif (now_ts - ts) < 604800: s = "\U0001f7e1"
+        else: s = "\U0001f534"
+        fields.append((s, r["name"], fmt(r["ts"])))
     mid = (len(fields) + 1) // 2
     left = fields[:mid]
     right = fields[mid:]
-
     left_str = "\n".join(f"{s} `{w:<11}` **{n}**" for s, n, w in left)
     right_str = "\n".join(f"{s} `{w:<11}` **{n}**" for s, n, w in right)
-
     embed = discord.Embed(title=title, color=0x1f6feb, timestamp=datetime.now(timezone.utc))
     embed.add_field(name="\u200b", value=left_str or "\u200b", inline=True)
     embed.add_field(name="\u200b", value=right_str or "\u200b", inline=True)
-    embed.set_footer(text=f"Updates every 10 min | {len(results)} games | 🟢 <1d  🟡 <1w  🔴 older  ⚫ none")
+    embed.set_footer(text=f"Updates every 10 min | {len(results)} games")
     return embed
 
-# ---------- Events ----------
 @bot.event
 async def on_ready():
-    bot._session = aiohttp.ClientSession()
-    bot._sem = asyncio.Semaphore(10)
-    print(f"Logged in as {bot.user}")
-    try:
-        synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash commands")
-        for cmd in synced:
-            print(f"  /{cmd.name}")
-    except Exception as e:
-        print(f"Sync error: {e}")
-        traceback.print_exc()
+    print(f"Logged in as {bot.user} ({bot.user.id})")
+    synced = await bot.tree.sync()
+    print(f"Synced {len(synced)} commands: {[c.name for c in synced]}")
     pinned_updater.start()
+    print("Ready.")
 
-# ---------- Commands ----------
-@bot.tree.command(name="ping", description="Check if bot is alive and API works")
-async def cmd_ping(interaction: discord.Interaction):
-    await interaction.response.defer()
-    try:
-        t0 = time.time()
-        results = await fetch_all()
-        ok = sum(1 for r in results if r["ts"])
-        elapsed = time.time() - t0
-        await interaction.followup.send(f"Online. {ok}/{len(results)} games fetched in {elapsed:.1f}s. Use `/pinboard`.")
-    except Exception as e:
-        await interaction.followup.send(f"Error: {e}")
-        traceback.print_exc()
+@bot.tree.command(name="ping", description="Test bot")
+async def ping_cmd(interaction: discord.Interaction):
+    await interaction.response.send_message("pong", ephemeral=True)
 
 @bot.tree.command(name="updates", description="Show latest game updates")
-async def cmd_updates(interaction: discord.Interaction, game: str = None):
+async def updates_cmd(interaction: discord.Interaction, game: str = None):
     await interaction.response.defer()
     try:
-        results = await fetch_all()
+        print("Fetching...")
+        results = await fetch_games()
+        print(f"Got {len(results)} results")
         if game:
             q = game.lower()
             results = [r for r in results if q in r["name"].lower()]
         if not results:
             await interaction.followup.send("No updates found.")
             return
-        title = "Game Updates"
-        if game:
-            title += f' matching "{game}"'
-        embed = build_embed(results, title)
+        embed = build_embed(results, "Game Updates" + (f' matching "{game}"' if game else ""))
         await interaction.followup.send(embed=embed)
     except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback; traceback.print_exc()
         await interaction.followup.send(f"Error: {e}")
-        traceback.print_exc()
 
-@bot.tree.command(name="latest", description="Show latest update for a specific game")
-async def cmd_latest(interaction: discord.Interaction, game: str):
+@bot.tree.command(name="latest", description="Show latest update for a game")
+async def latest_cmd(interaction: discord.Interaction, game: str):
     await interaction.response.defer()
     try:
-        results = await fetch_all()
+        results = await fetch_games()
         q = game.lower()
         matches = [(r, s) for r in results if (s := _score(q, r["name"].lower())) > 0]
         matches.sort(key=lambda x: x[1], reverse=True)
@@ -234,7 +187,7 @@ async def cmd_latest(interaction: discord.Interaction, game: str):
         await interaction.followup.send(embed=embed)
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
 
 def _score(q, n):
     if q == n: return 100
@@ -242,17 +195,17 @@ def _score(q, n):
     if q in n: return 70
     return sum(20 for w in q.split() if any(w in nw for nw in n.split()))
 
-@bot.tree.command(name="pinboard", description="Create/refresh the auto-updating pinned status board")
+@bot.tree.command(name="pinboard", description="Create auto-updating pinned status board")
 @commands.has_permissions(manage_messages=True)
-async def cmd_pinboard(interaction: discord.Interaction):
+async def pinboard_cmd(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        results = await fetch_all()
+        results = await fetch_games()
         embed = build_embed(results, "Game Update Status")
         msg = await interaction.channel.send(embed=embed)
         try:
             await msg.pin()
-        except Exception:
+        except:
             pass
         cfg = load_config()
         cfg["channel_id"] = interaction.channel_id
@@ -262,27 +215,20 @@ async def cmd_pinboard(interaction: discord.Interaction):
         await interaction.followup.send("Board pinned. Auto-updating every 10 min.")
     except Exception as e:
         await interaction.followup.send(f"Error: {e}")
-        traceback.print_exc()
+        import traceback; traceback.print_exc()
 
 @bot.tree.command(name="stopboard", description="Stop the auto-updating board")
 @commands.has_permissions(manage_messages=True)
-async def cmd_stopboard(interaction: discord.Interaction):
-    cfg = load_config()
-    cfg["channel_id"] = 0
-    cfg["message_id"] = 0
-    save_config(cfg)
-    await interaction.response.send_message("Auto-update board stopped.")
+async def stopboard_cmd(interaction: discord.Interaction):
+    save_config({"channel_id": 0, "message_id": 0, "last_ts": {}})
+    await interaction.response.send_message("Stopped.")
 
 @bot.tree.command(name="search", description="Search tracked games")
-async def cmd_search(interaction: discord.Interaction, name: str):
+async def search_cmd(interaction: discord.Interaction, name: str):
     q = name.lower()
     matches = [n for n in GAMES.values() if q in n.lower()]
-    if not matches:
-        await interaction.response.send_message("No matches.")
-        return
-    await interaction.response.send_message("**Games:**\n" + "\n".join(f"• {m}" for m in sorted(matches)[:25]))
+    await interaction.response.send_message("**Games:**\n" + "\n".join(f"- {m}" for m in sorted(matches)[:25]) or "No matches.")
 
-# ---------- Background pinned-updater ----------
 @tasks.loop(minutes=10)
 async def pinned_updater():
     cfg = load_config()
@@ -295,9 +241,9 @@ async def pinned_updater():
         return
     try:
         pinned_msg = await channel.fetch_message(mid)
-    except Exception:
+    except:
         return
-    results = await fetch_all()
+    results = await fetch_games()
     cfg = load_config()
     last_ts = cfg.get("last_ts", {})
     alerts = []
@@ -306,62 +252,22 @@ async def pinned_updater():
         ts = r["ts"] or 0
         prev = last_ts.get(appid, 0)
         if ts > prev and prev > 0:
-            alerts.append(f"**{r['name']}** updated — {fmt(ts)}")
+            alerts.append(f"**{r['name']}** updated - {fmt(ts)}")
         last_ts[appid] = ts
     embed = build_embed(results, "Game Update Status")
     await pinned_msg.edit(content=None, embed=embed)
     if alerts:
-        await channel.send(embed=discord.Embed(title="New Updates Detected", description="\n".join(alerts), color=0x3fb950), delete_after=600)
+        await channel.send(embed=discord.Embed(title="New Updates", description="\n".join(alerts), color=0x3fb950), delete_after=600)
     cfg["last_ts"] = last_ts
     save_config(cfg)
 
 @pinned_updater.before_loop
-async def before_pinned():
+async def _():
     await bot.wait_until_ready()
-
-# ---------- Run ----------
-MAX_RETRIES = 5
-RETRY_DELAY = 30
-
-def run_bot():
-    retries = 0
-    while True:
-        try:
-            bot.run(TOKEN, log_handler=None)
-        except discord.errors.LoginFailure:
-            print("Invalid token. Exiting.")
-            break
-        except Exception as e:
-            retries += 1
-            print(f"Connection lost ({e}). Retry {retries}/{MAX_RETRIES} in {RETRY_DELAY}s...")
-            if retries >= MAX_RETRIES:
-                print("Max retries. Exiting.")
-                break
-            time.sleep(RETRY_DELAY)
-        else:
-            break
 
 if __name__ == "__main__":
     if not TOKEN:
-        print("Set DISCORD_TOKEN in .env file or environment variable.")
+        print("No DISCORD_TOKEN found in .env or environment.")
         exit(1)
-
-    PORT = int(os.getenv("PORT", "8080"))
-
-    from http.server import HTTPServer, BaseHTTPRequestHandler
-    class H(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.end_headers()
-            self.wfile.write(b"ok")
-        def log_message(self, *a):
-            pass
-
-    import threading
-    httpd = HTTPServer(("0.0.0.0", PORT), H)
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
-    print(f"Health server on port {PORT}")
-
     print("Starting bot...")
-    run_bot()
+    bot.run(TOKEN, log_handler=None)
