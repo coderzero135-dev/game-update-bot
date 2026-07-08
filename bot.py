@@ -175,9 +175,8 @@ async def game_autocomplete(interaction: discord.Interaction, current: str) -> l
 async def on_ready():
     logger.info("Logged in as %s", bot.user)
     bot.add_view(BoardView())
-    # Force full resync — clears stale commands
+    # Sync slash commands
     try:
-        bot.tree.clear_commands(guild=None)
         synced = await bot.tree.sync()
         logger.info("Synced %d commands: %s", len(synced), [c.name for c in synced])
     except Exception as e:
