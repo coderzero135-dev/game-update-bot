@@ -99,22 +99,25 @@ def save_config(cfg):
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
+http_session = None
+semaphore = asyncio.Semaphore(10)
 
-async def fetch_latest(session, appid):
+async def fetch_latest(appid):
     url = "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/"
     try:
-        async with session.get(url, params={"appid": appid, "count": 1, "maxlength": 1, "format": "json"}, timeout=aiohttp.ClientTimeout(total=10)) as r:
-            if r.status != 200:
-                return None, None
-            data = await r.json()
-            items = data.get("appnews", {}).get("newsitems", [])
-            if not items:
-                return None, None
-            return items[0].get("date", 0), items[0].get("url", "")
+        async with semaphore:
+            async with http_session.get(url, params={"appid": appid, "count": 1, "maxlength": 1, "format": "json"}, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                if r.status != 200:
+                    return None, None
+                data = await r.json()
+                items = data.get("appnews", {}).get("newsitems", [])
+                if not items:
+                    return None, None
+                return items[0].get("date", 0), items[0].get("url", "")
     except Exception:
         return None, None
 
-async def fetch_all(session):
+async def fetch_all():
     now = time.time()
     results = []
 
@@ -123,11 +126,15 @@ async def fetch_all(session):
         if ck in CACHE and now - CACHE[ck]["ts"] < CACHE_TTL:
             ts, url = CACHE[ck]["data"]
         else:
-            ts, url = await fetch_latest(session, appid)
+            ts, url = await fetch_latest(appid)
             CACHE[ck] = {"ts": now, "data": (ts, url)}
         results.append({"name": name, "appid": appid, "ts": ts, "url": url})
 
-    await asyncio.gather(*[one(aid, name) for aid, name in GAMES.items()])
+    coros = [one(aid, name) for aid, name in GAMES.items()]
+    try:
+        await asyncio.wait_for(asyncio.gather(*coros), timeout=30)
+    except asyncio.TimeoutError:
+        pass
     return results
 
 def fmt(ts):
@@ -194,6 +201,8 @@ def build_embed(results, title="Game Updates"):
 # ---------- bot events ----------
 @bot.event
 async def on_ready():
+    global http_session
+    http_session = aiohttp.ClientSession()
     print(f"Logged in as {bot.user}")
     try:
         synced = await bot.tree.sync()
@@ -206,8 +215,7 @@ async def on_ready():
 @bot.tree.command(name="updates", description="Show latest game updates")
 async def cmd_updates(interaction: discord.Interaction, game: str = None):
     await interaction.response.defer()
-    async with aiohttp.ClientSession() as session:
-        results = await fetch_all(session)
+    results = await fetch_all()
     if game:
         q = game.lower()
         results = [r for r in results if q in r["name"].lower()]
@@ -223,8 +231,7 @@ async def cmd_updates(interaction: discord.Interaction, game: str = None):
 @bot.tree.command(name="latest", description="Show latest update for a specific game")
 async def cmd_latest(interaction: discord.Interaction, game: str):
     await interaction.response.defer()
-    async with aiohttp.ClientSession() as session:
-        results = await fetch_all(session)
+    results = await fetch_all()
     q = game.lower()
     matches = [(r, s) for r in results if (s := _score(q, r["name"].lower())) > 0]
     matches.sort(key=lambda x: x[1], reverse=True)
@@ -249,8 +256,7 @@ def _score(q, n):
 @commands.has_permissions(manage_messages=True)
 async def cmd_pinboard(interaction: discord.Interaction):
     await interaction.response.defer()
-    async with aiohttp.ClientSession() as session:
-        results = await fetch_all(session)
+    results = await fetch_all()
 
     embed = build_embed(results, "Game Update Status")
     msg = await interaction.channel.send(embed=embed)
@@ -305,7 +311,7 @@ async def pinned_updater():
         return
 
     async with aiohttp.ClientSession() as session:
-        results = await fetch_all(session)
+        results = await fetch_all()
 
     cfg = load_config()
     last_ts = cfg.get("last_ts", {})
