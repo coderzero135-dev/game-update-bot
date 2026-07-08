@@ -186,43 +186,55 @@ async def on_ready():
 @bot.tree.command(name="ping", description="Check if bot is alive and API works")
 async def cmd_ping(interaction: discord.Interaction):
     await interaction.response.defer()
-    t0 = time.time()
-    results = await fetch_all()
-    ok = sum(1 for r in results if r["ts"])
-    elapsed = time.time() - t0
-    await interaction.followup.send(f"Online. {ok}/{len(results)} games fetched in {elapsed:.1f}s. Use `/pinboard` to create the status board.")
+    try:
+        t0 = time.time()
+        results = await fetch_all()
+        ok = sum(1 for r in results if r["ts"])
+        elapsed = time.time() - t0
+        await interaction.followup.send(f"Online. {ok}/{len(results)} games fetched in {elapsed:.1f}s. Use `/pinboard`.")
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}")
+        traceback.print_exc()
 
 @bot.tree.command(name="updates", description="Show latest game updates")
 async def cmd_updates(interaction: discord.Interaction, game: str = None):
     await interaction.response.defer()
-    results = await fetch_all()
-    if game:
-        q = game.lower()
-        results = [r for r in results if q in r["name"].lower()]
-    if not results:
-        await interaction.followup.send("No updates found.")
-        return
-    title = "Game Updates"
-    if game:
-        title += f' matching "{game}"'
-    embed = build_embed(results, title)
-    await interaction.followup.send(embed=embed)
+    try:
+        results = await fetch_all()
+        if game:
+            q = game.lower()
+            results = [r for r in results if q in r["name"].lower()]
+        if not results:
+            await interaction.followup.send("No updates found.")
+            return
+        title = "Game Updates"
+        if game:
+            title += f' matching "{game}"'
+        embed = build_embed(results, title)
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}")
+        traceback.print_exc()
 
 @bot.tree.command(name="latest", description="Show latest update for a specific game")
 async def cmd_latest(interaction: discord.Interaction, game: str):
     await interaction.response.defer()
-    results = await fetch_all()
-    q = game.lower()
-    matches = [(r, s) for r in results if (s := _score(q, r["name"].lower())) > 0]
-    matches.sort(key=lambda x: x[1], reverse=True)
-    if not matches:
-        await interaction.followup.send(f"No game matching `{game}`.")
-        return
-    r = matches[0][0]
-    embed = discord.Embed(title=r["name"], description=f"Last update: **{fmt(r['ts'])}**", color=0x1f6feb)
-    if r["url"]:
-        embed.add_field(name="Patch Notes", value=r["url"], inline=False)
-    await interaction.followup.send(embed=embed)
+    try:
+        results = await fetch_all()
+        q = game.lower()
+        matches = [(r, s) for r in results if (s := _score(q, r["name"].lower())) > 0]
+        matches.sort(key=lambda x: x[1], reverse=True)
+        if not matches:
+            await interaction.followup.send(f"No game matching `{game}`.")
+            return
+        r = matches[0][0]
+        embed = discord.Embed(title=r["name"], description=f"Last update: **{fmt(r['ts'])}**", color=0x1f6feb)
+        if r["url"]:
+            embed.add_field(name="Patch Notes", value=r["url"], inline=False)
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}")
+        traceback.print_exc()
 
 def _score(q, n):
     if q == n: return 100
@@ -234,19 +246,23 @@ def _score(q, n):
 @commands.has_permissions(manage_messages=True)
 async def cmd_pinboard(interaction: discord.Interaction):
     await interaction.response.defer()
-    results = await fetch_all()
-    embed = build_embed(results, "Game Update Status")
-    msg = await interaction.channel.send(embed=embed)
     try:
-        await msg.pin()
-    except Exception:
-        pass
-    cfg = load_config()
-    cfg["channel_id"] = interaction.channel_id
-    cfg["message_id"] = msg.id
-    cfg["last_ts"] = {r["appid"]: r["ts"] or 0 for r in results}
-    save_config(cfg)
-    await interaction.followup.send("Board pinned. Auto-updating every 10 min.")
+        results = await fetch_all()
+        embed = build_embed(results, "Game Update Status")
+        msg = await interaction.channel.send(embed=embed)
+        try:
+            await msg.pin()
+        except Exception:
+            pass
+        cfg = load_config()
+        cfg["channel_id"] = interaction.channel_id
+        cfg["message_id"] = msg.id
+        cfg["last_ts"] = {r["appid"]: r["ts"] or 0 for r in results}
+        save_config(cfg)
+        await interaction.followup.send("Board pinned. Auto-updating every 10 min.")
+    except Exception as e:
+        await interaction.followup.send(f"Error: {e}")
+        traceback.print_exc()
 
 @bot.tree.command(name="stopboard", description="Stop the auto-updating board")
 @commands.has_permissions(manage_messages=True)
