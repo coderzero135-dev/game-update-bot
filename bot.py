@@ -154,8 +154,44 @@ def save_config(cfg):
     try: json.dump(cfg, open(CONFIG_FILE, "w"))
     except: pass
 
-intents = discord.Intents.default()
-bot = commands.Bot(command_prefix="!", intents=intents)
+BUILD_STORE = {}
+BUILD_STORE_FILE = "build_versions.json"
+
+def load_builds():
+    global BUILD_STORE
+    try: BUILD_STORE = json.load(open(BUILD_STORE_FILE))
+    except: BUILD_STORE = {}
+
+def save_builds():
+    try: json.dump(BUILD_STORE, open(BUILD_STORE_FILE, "w"))
+    except: pass
+
+async def src_steam_build(appid, session, sem):
+    """Tracks build version changes via UpToDateCheck. Returns timestamp of change if version differs from last known."""
+    async with sem:
+        try:
+            async with session.get(
+                "https://api.steampowered.com/ISteamApps/UpToDateCheck/v1/",
+                params={"appid": appid, "version": 0},
+                timeout=aiohttp.ClientTimeout(total=4),
+            ) as r:
+                if r.status == 200:
+                    data = await r.json()
+                    resp = data.get("response", {})
+                    if not resp.get("success"):
+                        return 0, "", "", "—"
+                    ver = resp.get("required_version")
+                    if ver is None:
+                        return 0, "", "", "—"
+                    msg = resp.get("message", "")
+                    
+                    prev = BUILD_STORE.get(str(appid))
+                    BUILD_STORE[str(appid)] = {"ver": ver, "msg": msg, "ts": int(time.time())}
+                    
+                    if prev and prev.get("ver") != ver:
+                        return int(time.time()), "", f"Build {prev['ver']} → {ver} ({msg})", "Build"
+        except: pass
+    return 0, "", "", "—"
 
 # --- Sources ---
 
@@ -281,7 +317,7 @@ async def fetch_all():
                 async with lock: results.append(cached["data"])
                 return
 
-            s = [src_steam(steam_id, session, sem)] if steam_id else []
+            s = [src_steam(steam_id, session, sem), src_steam_build(steam_id, session, sem)] if steam_id else []
             r = [src_reddit(reddit_sub, session, sem)] if reddit_sub else []
             g = [src_googlenews(google_q or name, session, sem)]
             all_s = await asyncio.gather(*(s + r + g))
@@ -342,7 +378,7 @@ def rel_time(ts):
     if secs < 3600: return f"{secs//60}m ago"
     return f"{secs//3600}h ago"
 
-SRC_ICONS = {"Steam": "\U0001f3ae", "Reddit": "\U0001f4ac", "Web": "\U0001f310", "RSS": "\U0001f4f0", "—": ""}
+SRC_ICONS = {"Steam": "\U0001f3ae", "Reddit": "\U0001f4ac", "Web": "\U0001f310", "RSS": "\U0001f4f0", "Build": "\U0001f4e6", "—": ""}
 
 def build_board(results):
     results = sorted(results, key=lambda x: x["ts"] or 0, reverse=True)
@@ -535,11 +571,13 @@ async def pinned_updater():
 
     cfg["last_ts"] = last_ts
     save_config(cfg)
+    save_builds()
 
 @pinned_updater.before_loop
 async def _(): await bot.wait_until_ready()
 
 if __name__ == "__main__":
     if not TOKEN: print("No DISCORD_TOKEN found."); exit(1)
-    print("Starting real-time bot (Steam: 2min, Other sources: 10min)...")
+    load_builds()
+    print("Starting real-time bot (Steam: 2min, Other: 10min, Build: tracked)...")
     bot.run(TOKEN, log_handler=None)

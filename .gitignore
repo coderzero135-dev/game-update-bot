@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 bot_config.json
+build_versions.json
 update_channel.json
 *.bat
 templates/
