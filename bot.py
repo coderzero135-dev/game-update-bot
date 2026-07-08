@@ -199,17 +199,27 @@ async def src_steam_build(appid, session, sem):
 # --- Sources ---
 
 async def src_steam(appid, session, sem):
+    """Steam per-app news RSS - same data as SteamDB patch notes"""
     async with sem:
         try:
-            async with session.get(
-                "https://api.steampowered.com/ISteamNews/GetNewsForApp/v2/",
-                params={"appid": appid, "count": 1, "maxlength": 300, "format": "json"},
-                timeout=aiohttp.ClientTimeout(total=4),
-            ) as r:
-                if r.status == 200:
-                    items = (await r.json()).get("appnews", {}).get("newsitems", [])
-                    if items:
-                        return items[0].get("date", 0), items[0].get("url", ""), items[0].get("title", ""), "Steam"
+            url = f"https://store.steampowered.com/feeds/news/app/{appid}/"
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as r:
+                if r.status != 200:
+                    return 0, "", "", "—"
+                root = ElementTree.fromstring(await r.text())
+                for item in root.iter("item"):
+                    title = item.find("title")
+                    link = item.find("link")
+                    pub = item.find("pubDate")
+                    desc = item.find("description")
+                    if title is not None and pub is not None:
+                        try:
+                            dt = datetime.strptime(pub.text or "", "%a, %d %b %Y %H:%M:%S %z")
+                            ts = dt.timestamp()
+                            brief = (desc.text or "")[:300] if desc is not None and desc.text else (title.text or "")
+                            brief = re.sub(r"<[^>]+>", "", brief).strip()[:200]
+                            return ts, link.text if link is not None else "", brief, "Steam"
+                        except: continue
         except: pass
     return 0, "", "", "—"
 
